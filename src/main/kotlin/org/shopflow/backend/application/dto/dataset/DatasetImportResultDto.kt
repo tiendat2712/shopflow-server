@@ -1,0 +1,26 @@
+package org.shopflow.backend.application.dto.dataset
+
+data class DatasetImportResultDto(
+    val sourceDirectory: String,
+    val downloadedFromRemote: Boolean,
+    val cloudinaryLiveUploadUsed: Boolean,
+    val usersInserted: Int,
+    val usersSkipped: Int,
+    val categoriesInserted: Int,
+    val categoriesExisting: Int,
+    val productsInserted: Int,
+    val productsSkipped: Int,
+    val productsImageUpdated: Int,
+    val ordersInserted: Int = 0,
+    val ordersSkipped: Int = 0,
+    val orderItemsInserted: Int = 0,
+    val orderItemsSkipped: Int = 0,
+    val reviewsInserted: Int = 0,
+    val reviewsSkipped: Int = 0,
+    val productReviewCountsUpdated: Int = 0,
+    val userEventsInserted: Int = 0,
+    val userEventsSkipped: Int = 0,
+    val categoryImageUrls: Map<String, String>,
+    val stagedCsvFiles: Map<String, Long> = emptyMap(),
+    val durationMs: Long,
+)
