@@ -7,5 +7,5 @@ import org.springframework.boot.runApplication
 class ShopflowBackendApplication
 
 fun main(args: Array<String>) {
-	runApplication<ShopflowBackendApplication>(*args)
+    runApplication<ShopflowBackendApplication>(*args)
 }
