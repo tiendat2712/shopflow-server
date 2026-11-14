@@ -5,6 +5,11 @@ spring:
   application:
     name: shopflow-backend
 
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+
   datasource:
     url: jdbc:mysql://${DB_HOST}:${DB_PORT}/shopflow_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: ${DB_USERNAME}
@@ -27,10 +32,22 @@ spring:
     mongodb:
       auto-index-creation: true
 
-
 jwt:
   secret: ${JWT_SECRET_BASE64}
 
 app:
   cors:
     allowed-origins: ${FRONTEND_URL:http://localhost:5173,http://localhost:3000}
+  dataset:
+    local-dir: ${DATASET_LOCAL_DIR:data/ecommerce_dataset}
+    kaggle-slug: ${KAGGLE_DATASET_SLUG:abhayayare/e-commerce-dataset}
+    kaggle-username: ${KAGGLE_USERNAME:}
+    kaggle-key: ${KAGGLE_KEY:}
+    default-user-password: ${DATASET_DEFAULT_USER_PASSWORD:ShopFlow@123!}
+
+cloudinary:
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+  api-key: ${CLOUDINARY_API_KEY:}
+  api-secret: ${CLOUDINARY_API_SECRET:}
+  secure: true
+  root-folder: ${CLOUDINARY_ROOT_FOLDER:shopflow}
