@@ -53,8 +53,8 @@ Triển khai tuần tự 4 tầng để tôn trọng Dependency Inversion (`pres
 4. **Tầng 4 — `presentation/` (REST API & Exception Handling):**
    - `presentation/dto/<context>/`: `*Request` (kèm Jakarta Validation) và `*Response`.
    - `presentation/converter/<Context>PresentationConverter.kt`: Map `Request <-> Command/Query` và `Dto <-> Response`.
-   - `presentation/controller/<Context>Controller.kt`: Gọi UseCase, gắn `@PreAuthorize(...)`, tuyệt đối không chạm Repository hay JPA Entity.
-   - `presentation/exceptionhandler/GlobalExceptionHandler.kt`: Bổ sung ánh xạ cho mọi `DomainException` mới trong khối `when (ex)`.
+   - `presentation/controller/<Context>Controller.kt`: Gọi UseCase, gắn `@PreAuthorize(...)`, bọc mọi JSON response qua `ApiResponse.ok(...)` / `ApiResponse.created(...)` (`204 No Content` giữ body rỗng) và đăng ký mã nghiệp vụ trong `ApiCode.kt`, tuyệt đối không chạm Repository hay JPA Entity.
+   - `presentation/exceptionhandler/GlobalExceptionHandler.kt`: Bổ sung ánh xạ cho mọi `DomainException` mới trong khối `when (ex)` và đăng ký mã lỗi tương ứng trong `ApiCode.kt`.
 
 ---
 

@@ -1,7 +1,7 @@
 # ShopFlow Backend — Architecture Blueprint (`overview.md`)
 
 Tài liệu tham chiếu kiến trúc chuẩn (Few-Shot Reference Blueprint) cho dự án **`org.shopflow.backend`**, được tổng hợp từ mô hình nghiệp vụ E-Commerce cốt lõi và thiết kế **Clean Architecture + DDD + CQRS Pattern** hiện hữu.
-Xem thêm đặc tả schema cơ sở dữ liệu tổng thể (MySQL + MongoDB) tại [`database-schema.md`](./database-schema.md).
+Xem thêm đặc tả schema cơ sở dữ liệu tổng thể (MySQL + MongoDB) tại [`database-schema.md`](./database-schema.md) và chuẩn response REST API thống nhất tại [`docs/api/response-contract.md`](../api/response-contract.md).
 
 ---
 
@@ -157,12 +157,13 @@ shopflow-backend/
     │       └── presentation/                           # [TẦNG 4] REST API & VALIDATION
     │           ├── controller/
     │           │   ├── AuthController.kt               # /api/auth/{register,login,refresh,logout,me}
-    │           │   └── StatusController.kt             # GET / và GET /api/status
+    │           │   └── StatusController.kt             # GET / (text/plain) và GET /api/status (ApiResponse)
     │           ├── converter/
     │           │   ├── AuthPresentationConverter.kt    # Request <-> Command & Dto <-> Response
     │           │   └── StatusPresentationConverter.kt  # SystemStatusDto -> SystemStatusResponse
     │           ├── dto/
-    │           │   ├── ErrorResponse.kt                # Chuẩn payload lỗi thống nhất
+    │           │   ├── ApiCode.kt                      # Tập trung mã nghiệp vụ & lỗi chuẩn hóa
+    │           │   ├── ApiResponse.kt                  # Chuẩn envelope ApiResponse<T> & ApiErrorDetail
     │           │   ├── SystemStatusResponse.kt
     │           │   └── auth/
     │           │       ├── AuthResponse.kt
@@ -171,7 +172,9 @@ shopflow-backend/
     │           │       ├── RegisterRequest.kt
     │           │       └── UserProfileResponse.kt
     │           ├── exceptionhandler/
-    │           │   └── GlobalExceptionHandler.kt       # @RestControllerAdvice ánh xạ DomainException -> HTTP Status
+    │           │   ├── ApiErrorResponseWriter.kt       # Ghi chuẩn lỗi JSON & tôn trọng content negotiation
+    │           │   ├── GlobalExceptionHandler.kt       # @RestControllerAdvice ánh xạ DomainException -> ApiResponse
+    │           │   └── SecurityExceptionHandlers.kt    # ApiAuthenticationEntryPoint & ApiAccessDeniedHandler
     │           ├── openapi/
     │           │   └── OpenApiConstants.kt             # Constants cho Swagger/OpenAPI
     │           └── validation/
