@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import org.shopflow.backend.application.command.dataset.ImportKaggleDatasetCommand
+import org.shopflow.backend.domain.exception.ProductConcurrencyConflictException
+import org.shopflow.backend.domain.exception.ProductNotFoundException
 import org.shopflow.backend.domain.model.auth.Email
 import org.shopflow.backend.domain.model.auth.HashedPassword
 import org.shopflow.backend.domain.model.auth.Permission
@@ -100,6 +102,7 @@ class ImportKaggleDatasetUseCaseTest {
         assertEquals(BigDecimal("157.89"), importedGadget.price.amount)
         assertEquals("https://cdn.example/categories/electronics.png", importedGadget.imageUrl)
         assertEquals(1, importedGadget.reviewCount)
+        assertEquals(1L, importedGadget.version)
 
         val storedOrder = batchImportPort.orders[DatasetUuidConverter.orderId("O1")]!!
         assertEquals(UserId.deterministic("U000001").value.toString(), storedOrder.userId)
@@ -134,6 +137,9 @@ class ImportKaggleDatasetUseCaseTest {
         assertEquals(0, secondRun.productReviewCountsUpdated)
         assertEquals(0, secondRun.userEventsInserted)
         assertEquals(2, secondRun.userEventsSkipped)
+
+        val gadgetAfterSecondRun = productRepo.findById(ProductId.deterministic("P000001"))!!
+        assertEquals(2L, gadgetAfterSecondRun.version)
     }
 
     @Test
@@ -464,8 +470,21 @@ class ImportKaggleDatasetUseCaseTest {
         private val store = linkedMapOf<ProductId, Product>()
 
         override fun save(product: Product): Product {
+            if (product.id in store) {
+                return update(product)
+            }
             store[product.id] = product
             return product
+        }
+
+        override fun update(product: Product): Product {
+            val existing = store[product.id] ?: throw ProductNotFoundException()
+            if (existing.version != product.version) {
+                throw ProductConcurrencyConflictException()
+            }
+            val updated = rehydrateWith(product, version = existing.version + 1L)
+            store[product.id] = updated
+            return updated
         }
 
         override fun saveAll(products: Collection<Product>): List<Product> = products.map(::save)
@@ -492,7 +511,7 @@ class ImportKaggleDatasetUseCaseTest {
             var count = 0
             store.entries.toList().forEach { (id, p) ->
                 if (p.categoryId == categoryId) {
-                    store[id] = p.copy(imageUrl = imageUrl)
+                    store[id] = rehydrateWith(p, imageUrl = imageUrl, version = p.version + 1L)
                     count++
                 }
             }
@@ -504,11 +523,35 @@ class ImportKaggleDatasetUseCaseTest {
             store.entries.toList().forEach { (id, product) ->
                 val expected = countsByProductId[id.value.toString()] ?: 0
                 if (product.reviewCount != expected) {
-                    store[id] = product.copy(reviewCount = expected)
+                    store[id] = rehydrateWith(product, reviewCount = expected, version = product.version + 1L)
                     updated++
                 }
             }
             return updated
         }
+
+        private fun rehydrateWith(
+            source: Product,
+            reviewCount: Int = source.reviewCount,
+            imageUrl: String? = source.imageUrl,
+            version: Long = source.version,
+        ): Product =
+            Product.rehydrate(
+                id = source.id,
+                categoryId = source.categoryId,
+                name = source.name,
+                slug = source.slug,
+                sku = source.sku,
+                description = source.description,
+                price = source.price,
+                stockQuantity = source.stockQuantity,
+                averageRating = source.averageRating,
+                reviewCount = reviewCount,
+                imageUrl = imageUrl,
+                status = source.status,
+                version = version,
+                createdAt = source.createdAt,
+                updatedAt = source.updatedAt,
+            )
     }
 }

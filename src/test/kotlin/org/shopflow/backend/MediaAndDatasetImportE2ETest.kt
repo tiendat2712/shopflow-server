@@ -5,11 +5,16 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.shopflow.backend.domain.model.auth.Email
+import org.shopflow.backend.domain.model.auth.HashedPassword
 import org.shopflow.backend.domain.model.auth.Role
+import org.shopflow.backend.domain.model.auth.User
 import org.shopflow.backend.domain.model.auth.UserId
+import org.shopflow.backend.domain.model.auth.UserStatus
 import org.shopflow.backend.domain.model.product.CategoryId
 import org.shopflow.backend.domain.model.product.ProductId
 import org.shopflow.backend.domain.repository.auth.RoleRepository
+import org.shopflow.backend.domain.repository.auth.UserRepository
 import org.shopflow.backend.domain.service.auth.TokenProvider
 import org.shopflow.backend.domain.service.dataset.DatasetUuidConverter
 import org.springframework.beans.factory.annotation.Autowired
@@ -34,6 +39,7 @@ import org.springframework.web.context.WebApplicationContext
 import tools.jackson.databind.ObjectMapper
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Instant
 
 @SpringBootTest
 class MediaAndDatasetImportE2ETest {
@@ -45,6 +51,9 @@ class MediaAndDatasetImportE2ETest {
 
     @Autowired
     private lateinit var roleRepository: RoleRepository
+
+    @Autowired
+    private lateinit var userRepository: UserRepository
 
     @Autowired
     private lateinit var tokenProvider: TokenProvider
@@ -70,58 +79,29 @@ class MediaAndDatasetImportE2ETest {
         val staffRole = roleRepository.findByName(Role.ROLE_STAFF)!!
         val adminRole = roleRepository.findByName(Role.ROLE_ADMIN)!!
 
-        val customerToken =
-            tokenProvider.generateAccessToken(
-                userId = UserId.generate(),
-                roles = setOf(customerRole.name),
-                permissions = customerRole.getPermissionCodes(),
-            )
-        val staffToken =
-            tokenProvider.generateAccessToken(
-                userId = UserId.generate(),
-                roles = setOf(staffRole.name),
-                permissions = staffRole.getPermissionCodes(),
-            )
-        val adminToken =
-            tokenProvider.generateAccessToken(
-                userId = UserId.generate(),
-                roles = setOf(adminRole.name),
-                permissions = adminRole.getPermissionCodes(),
-            )
+        val now = Instant.now()
+        val createdActorIds = mutableListOf<String>()
 
-        val pngHeader = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02)
-        val validPng = MockMultipartFile("file", "sample.png", "image/png", pngHeader)
-        val fakeText = MockMultipartFile("file", "fake.png", "image/png", "not-png".toByteArray())
-
-        mockMvc
-            .perform(multipart("/api/media/upload").file(validPng).param("folder", "products"))
-            .andExpect(status().isUnauthorized)
-
-        mockMvc
-            .perform(
-                multipart("/api/media/upload")
-                    .file(validPng)
-                    .param("folder", "products")
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer $customerToken"),
-            ).andExpect(status().isForbidden)
-
-        mockMvc
-            .perform(
-                multipart("/api/media/upload")
-                    .file(fakeText)
-                    .param("folder", "products")
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer $staffToken"),
-            ).andExpect(status().isBadRequest)
-
-        mockMvc
-            .perform(
-                multipart("/api/media/upload")
-                    .file(validPng)
-                    .param("folder", "products")
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer $staffToken"),
-            ).andExpect(status().isBadGateway)
-
-        writeSampleDatasetTo(tempDatasetDir)
+        fun saveActor(
+            label: String,
+            role: Role,
+        ): User {
+            val id = UserId.generate()
+            val saved =
+                userRepository.save(
+                    User(
+                        id = id,
+                        email = Email.of("e2e-media-$label-${id.value}@shopflow.org"),
+                        hashedPassword = HashedPassword("e2e-media-unused-hash"),
+                        roles = setOf(role),
+                        status = UserStatus.ACTIVE,
+                        createdAt = now,
+                        updatedAt = now,
+                    ),
+                )
+            createdActorIds += saved.id.value.toString()
+            return saved
+        }
 
         val importedUser1Id = UserId.deterministic("E2E_U001").value.toString()
         val importedUser2Id = UserId.deterministic("E2E_U002").value.toString()
@@ -135,6 +115,63 @@ class MediaAndDatasetImportE2ETest {
         val catBooksId = CategoryId.deterministic("E2E Books").value.toString()
 
         try {
+            val customerActor = saveActor("customer", customerRole)
+            val staffActor = saveActor("staff", staffRole)
+            val adminActor = saveActor("admin", adminRole)
+
+            val customerToken =
+                tokenProvider.generateAccessToken(
+                    userId = customerActor.id,
+                    roles = setOf(customerRole.name),
+                    permissions = customerRole.getPermissionCodes(),
+                )
+            val staffToken =
+                tokenProvider.generateAccessToken(
+                    userId = staffActor.id,
+                    roles = setOf(staffRole.name),
+                    permissions = staffRole.getPermissionCodes(),
+                )
+            val adminToken =
+                tokenProvider.generateAccessToken(
+                    userId = adminActor.id,
+                    roles = setOf(adminRole.name),
+                    permissions = adminRole.getPermissionCodes(),
+                )
+
+            val pngHeader = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02)
+            val validPng = MockMultipartFile("file", "sample.png", "image/png", pngHeader)
+            val fakeText = MockMultipartFile("file", "fake.png", "image/png", "not-png".toByteArray())
+
+            mockMvc
+                .perform(multipart("/api/media/upload").file(validPng).param("folder", "products"))
+                .andExpect(status().isUnauthorized)
+
+            mockMvc
+                .perform(
+                    multipart("/api/media/upload")
+                        .file(validPng)
+                        .param("folder", "products")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer $customerToken"),
+                ).andExpect(status().isForbidden)
+
+            mockMvc
+                .perform(
+                    multipart("/api/media/upload")
+                        .file(fakeText)
+                        .param("folder", "products")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer $staffToken"),
+                ).andExpect(status().isBadRequest)
+
+            mockMvc
+                .perform(
+                    multipart("/api/media/upload")
+                        .file(validPng)
+                        .param("folder", "products")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer $staffToken"),
+                ).andExpect(status().isBadGateway)
+
+            writeSampleDatasetTo(tempDatasetDir)
+
             mockMvc
                 .perform(
                     post("/api/admin/datasets/import-kaggle")
@@ -163,19 +200,21 @@ class MediaAndDatasetImportE2ETest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(importPayload),
                     ).andExpect(status().isOk)
-                    .andExpect(jsonPath("$.downloadedFromRemote").value(false))
-                    .andExpect(jsonPath("$.cloudinaryLiveUploadUsed").value(false))
-                    .andExpect(jsonPath("$.usersInserted").value(2))
-                    .andExpect(jsonPath("$.categoriesInserted").value(2))
-                    .andExpect(jsonPath("$.productsInserted").value(2))
-                    .andExpect(jsonPath("$.ordersInserted").value(1))
-                    .andExpect(jsonPath("$.orderItemsInserted").value(1))
-                    .andExpect(jsonPath("$.reviewsInserted").value(1))
-                    .andExpect(jsonPath("$.productReviewCountsUpdated").value(1))
-                    .andExpect(jsonPath("$.userEventsInserted").value(1))
+                    .andExpect(jsonPath("$.code").value("DATASET_IMPORT_SUCCESS"))
+                    .andExpect(jsonPath("$.status").value(200))
+                    .andExpect(jsonPath("$.result.downloadedFromRemote").value(false))
+                    .andExpect(jsonPath("$.result.cloudinaryLiveUploadUsed").value(false))
+                    .andExpect(jsonPath("$.result.usersInserted").value(2))
+                    .andExpect(jsonPath("$.result.categoriesInserted").value(2))
+                    .andExpect(jsonPath("$.result.productsInserted").value(2))
+                    .andExpect(jsonPath("$.result.ordersInserted").value(1))
+                    .andExpect(jsonPath("$.result.orderItemsInserted").value(1))
+                    .andExpect(jsonPath("$.result.reviewsInserted").value(1))
+                    .andExpect(jsonPath("$.result.productReviewCountsUpdated").value(1))
+                    .andExpect(jsonPath("$.result.userEventsInserted").value(1))
                     .andReturn()
 
-            val json = objectMapper.readTree(firstResult.response.contentAsString)
+            val json = objectMapper.readTree(firstResult.response.contentAsString)["result"]
             assertTrue(json["categoryImageUrls"].has("e2e-electronics"))
             assertEquals(0, json["stagedCsvFiles"].size())
 
@@ -207,15 +246,17 @@ class MediaAndDatasetImportE2ETest {
                             ),
                         ),
                 ).andExpect(status().isOk)
-                .andExpect(jsonPath("$.accessToken").isNotEmpty)
+                .andExpect(jsonPath("$.code").value("AUTH_LOGIN_SUCCESS"))
+                .andExpect(jsonPath("$.result.accessToken").isNotEmpty)
 
             mockMvc
                 .perform(
                     get("/api/products")
                         .param("categorySlug", "e2e-electronics"),
                 ).andExpect(status().isOk)
-                .andExpect(jsonPath("$.totalElements").value(1))
-                .andExpect(jsonPath("$.items[0].reviewCount").value(1))
+                .andExpect(jsonPath("$.code").value("PRODUCT_LIST_SUCCESS"))
+                .andExpect(jsonPath("$.result.totalElements").value(1))
+                .andExpect(jsonPath("$.result.items[0].reviewCount").value(1))
 
             mockMvc
                 .perform(
@@ -224,19 +265,20 @@ class MediaAndDatasetImportE2ETest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(importPayload),
                 ).andExpect(status().isOk)
-                .andExpect(jsonPath("$.usersInserted").value(0))
-                .andExpect(jsonPath("$.usersSkipped").value(2))
-                .andExpect(jsonPath("$.productsInserted").value(0))
-                .andExpect(jsonPath("$.productsSkipped").value(2))
-                .andExpect(jsonPath("$.ordersInserted").value(0))
-                .andExpect(jsonPath("$.ordersSkipped").value(1))
-                .andExpect(jsonPath("$.orderItemsInserted").value(0))
-                .andExpect(jsonPath("$.orderItemsSkipped").value(1))
-                .andExpect(jsonPath("$.reviewsInserted").value(0))
-                .andExpect(jsonPath("$.reviewsSkipped").value(1))
-                .andExpect(jsonPath("$.productReviewCountsUpdated").value(0))
-                .andExpect(jsonPath("$.userEventsInserted").value(0))
-                .andExpect(jsonPath("$.userEventsSkipped").value(1))
+                .andExpect(jsonPath("$.code").value("DATASET_IMPORT_SUCCESS"))
+                .andExpect(jsonPath("$.result.usersInserted").value(0))
+                .andExpect(jsonPath("$.result.usersSkipped").value(2))
+                .andExpect(jsonPath("$.result.productsInserted").value(0))
+                .andExpect(jsonPath("$.result.productsSkipped").value(2))
+                .andExpect(jsonPath("$.result.ordersInserted").value(0))
+                .andExpect(jsonPath("$.result.ordersSkipped").value(1))
+                .andExpect(jsonPath("$.result.orderItemsInserted").value(0))
+                .andExpect(jsonPath("$.result.orderItemsSkipped").value(1))
+                .andExpect(jsonPath("$.result.reviewsInserted").value(0))
+                .andExpect(jsonPath("$.result.reviewsSkipped").value(1))
+                .andExpect(jsonPath("$.result.productReviewCountsUpdated").value(0))
+                .andExpect(jsonPath("$.result.userEventsInserted").value(0))
+                .andExpect(jsonPath("$.result.userEventsSkipped").value(1))
         } finally {
             SecurityContextHolder.clearContext()
             jdbcTemplate.update("DELETE FROM user_events WHERE id = ?", importedEvent1Id)
@@ -249,7 +291,7 @@ class MediaAndDatasetImportE2ETest {
             listOf(catElecId, catBooksId).forEach {
                 jdbcTemplate.update("DELETE FROM categories WHERE id = ?", it)
             }
-            listOf(importedUser1Id, importedUser2Id).forEach {
+            (listOf(importedUser1Id, importedUser2Id) + createdActorIds).distinct().forEach {
                 jdbcTemplate.update("DELETE FROM refresh_tokens WHERE user_id = ?", it)
                 jdbcTemplate.update("DELETE FROM user_roles WHERE user_id = ?", it)
                 jdbcTemplate.update("DELETE FROM users WHERE id = ?", it)

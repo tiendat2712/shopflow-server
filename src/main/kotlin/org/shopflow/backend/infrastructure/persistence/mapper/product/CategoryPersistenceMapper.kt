@@ -33,4 +33,16 @@ class CategoryPersistenceMapper {
             displayOrder = domain.displayOrder,
             isActive = domain.isActive,
         )
+
+    fun updateEntity(
+        domain: Category,
+        entity: CategoryJpaEntity,
+    ) {
+        entity.name = domain.name
+        entity.slug = domain.slug.value
+        entity.parentId = domain.parentId?.value?.toString()
+        entity.description = domain.description
+        entity.displayOrder = domain.displayOrder
+        entity.isActive = domain.isActive
+    }
 }

@@ -5,6 +5,7 @@ import org.shopflow.backend.application.dto.product.CategoryDto
 import org.shopflow.backend.application.dto.product.PageResponseDto
 import org.shopflow.backend.application.query.product.CategoryQueryService
 import org.shopflow.backend.application.query.product.CategorySortField
+import org.shopflow.backend.application.query.product.ListAdminCategoriesQuery
 import org.shopflow.backend.application.query.product.ListCategoriesQuery
 import org.shopflow.backend.application.query.product.SortDirection
 import org.shopflow.backend.infrastructure.persistence.entity.product.CategoryJpaEntity
@@ -19,9 +20,39 @@ import java.time.Instant
 class CategoryQueryServiceImpl(
     private val categoryJpaRepository: CategoryJpaRepository,
 ) : CategoryQueryService {
-    override fun listCategories(query: ListCategoriesQuery): PageResponseDto<CategoryDto> {
-        val specification = buildSpecification(query)
-        val pageable = PageRequest.of(query.page, query.size, resolveSort(query.sortField, query.sortDirection))
+    override fun listPublicCategories(query: ListCategoriesQuery): PageResponseDto<CategoryDto> =
+        executeCategoryPageQuery(
+            page = query.page,
+            size = query.size,
+            isActiveFilter = true,
+            parentId = query.parentId,
+            keyword = query.keyword,
+            sortField = query.sortField,
+            sortDirection = query.sortDirection,
+        )
+
+    override fun listAdminCategories(query: ListAdminCategoriesQuery): PageResponseDto<CategoryDto> =
+        executeCategoryPageQuery(
+            page = query.page,
+            size = query.size,
+            isActiveFilter = query.isActive,
+            parentId = query.parentId,
+            keyword = query.keyword,
+            sortField = query.sortField,
+            sortDirection = query.sortDirection,
+        )
+
+    private fun executeCategoryPageQuery(
+        page: Int,
+        size: Int,
+        isActiveFilter: Boolean?,
+        parentId: String?,
+        keyword: String?,
+        sortField: CategorySortField,
+        sortDirection: SortDirection,
+    ): PageResponseDto<CategoryDto> {
+        val specification = buildSpecification(isActiveFilter, parentId, keyword)
+        val pageable = PageRequest.of(page, size, resolveSort(sortField, sortDirection))
         val pageResult = categoryJpaRepository.findAll(specification, pageable)
 
         val items =
@@ -49,17 +80,23 @@ class CategoryQueryServiceImpl(
         )
     }
 
-    private fun buildSpecification(query: ListCategoriesQuery): Specification<CategoryJpaEntity> =
+    private fun buildSpecification(
+        isActiveFilter: Boolean?,
+        parentId: String?,
+        keyword: String?,
+    ): Specification<CategoryJpaEntity> =
         Specification { root, _, cb ->
             val predicates = mutableListOf<Predicate>()
-            if (query.onlyActive) {
-                predicates += cb.isTrue(root.get("isActive"))
+            when (isActiveFilter) {
+                true -> predicates += cb.isTrue(root.get("isActive"))
+                false -> predicates += cb.isFalse(root.get("isActive"))
+                null -> Unit
             }
-            if (query.parentId != null) {
-                predicates += cb.equal(root.get<String>("parentId"), query.parentId)
+            if (parentId != null) {
+                predicates += cb.equal(root.get<String>("parentId"), parentId)
             }
-            if (query.keyword != null) {
-                val pattern = "%${query.keyword.lowercase()}%"
+            if (keyword != null) {
+                val pattern = "%${keyword.lowercase()}%"
                 predicates +=
                     cb.or(
                         cb.like(cb.lower(root.get("name")), pattern),

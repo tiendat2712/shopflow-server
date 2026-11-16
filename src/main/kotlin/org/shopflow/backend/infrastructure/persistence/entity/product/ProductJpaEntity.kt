@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
 import jakarta.persistence.Index
 import jakarta.persistence.Table
+import jakarta.persistence.Version
 import org.shopflow.backend.domain.model.product.ProductStatus
 import org.shopflow.backend.infrastructure.persistence.entity.common.BaseJpaEntity
 import java.math.BigDecimal
@@ -46,6 +47,9 @@ class ProductJpaEntity(
     @field:Enumerated(EnumType.STRING)
     @field:Column(name = "status", nullable = false, length = 32)
     var status: ProductStatus = ProductStatus.ACTIVE,
+    @field:Version
+    @field:Column(name = "version", nullable = false, columnDefinition = "BIGINT NOT NULL DEFAULT 0")
+    var version: Long = 0L,
 ) : BaseJpaEntity(id) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

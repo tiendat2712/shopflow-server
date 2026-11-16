@@ -15,4 +15,5 @@ data class ProductSummaryDto(
     val reviewCount: Int,
     val imageUrl: String?,
     val status: String,
+    val version: Long,
 )

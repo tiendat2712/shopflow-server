@@ -4,5 +4,7 @@ import org.shopflow.backend.application.dto.product.CategoryDto
 import org.shopflow.backend.application.dto.product.PageResponseDto
 
 interface CategoryQueryService {
-    fun listCategories(query: ListCategoriesQuery): PageResponseDto<CategoryDto>
+    fun listPublicCategories(query: ListCategoriesQuery): PageResponseDto<CategoryDto>
+
+    fun listAdminCategories(query: ListAdminCategoriesQuery): PageResponseDto<CategoryDto>
 }

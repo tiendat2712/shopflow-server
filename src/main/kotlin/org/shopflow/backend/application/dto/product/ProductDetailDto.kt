@@ -20,6 +20,7 @@ data class ProductDetailDto(
     val reviewCount: Int,
     val imageUrl: String?,
     val status: String,
+    val version: Long,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
@@ -40,6 +41,7 @@ fun Product.toDetailDto(category: Category): ProductDetailDto =
         reviewCount = reviewCount,
         imageUrl = imageUrl,
         status = status.name,
+        version = version,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

@@ -217,7 +217,7 @@ class JdbcDatasetBatchImportAdapter(
             "UPDATE products p " +
                 "LEFT JOIN (SELECT product_id, COUNT(*) AS cnt FROM reviews GROUP BY product_id) r " +
                 "ON p.id = r.product_id " +
-                "SET p.review_count = COALESCE(r.cnt, 0) " +
+                "SET p.review_count = COALESCE(r.cnt, 0), p.version = COALESCE(p.version, 0) + 1 " +
                 "WHERE p.review_count <> COALESCE(r.cnt, 0)"
     }
 }

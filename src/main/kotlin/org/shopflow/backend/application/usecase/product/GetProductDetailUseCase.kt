@@ -17,7 +17,7 @@ class GetProductDetailUseCase(
         if (key.isEmpty()) {
             throw ProductNotFoundException()
         }
-        return productQueryService.findProductDetail(key)
+        return productQueryService.findPublicProductDetail(key)
             ?: throw ProductNotFoundException()
     }
 }

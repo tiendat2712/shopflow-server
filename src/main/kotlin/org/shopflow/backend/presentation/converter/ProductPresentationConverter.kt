@@ -9,6 +9,7 @@ import org.shopflow.backend.application.dto.product.CategoryDto
 import org.shopflow.backend.application.dto.product.PageResponseDto
 import org.shopflow.backend.application.dto.product.ProductDetailDto
 import org.shopflow.backend.application.dto.product.ProductSummaryDto
+import org.shopflow.backend.domain.exception.DomainValidationException
 import org.shopflow.backend.presentation.dto.dataset.DatasetImportResponse
 import org.shopflow.backend.presentation.dto.dataset.ImportKaggleDatasetRequest
 import org.shopflow.backend.presentation.dto.product.CategoryResponse
@@ -18,6 +19,22 @@ import org.shopflow.backend.presentation.dto.product.PageResponse
 import org.shopflow.backend.presentation.dto.product.ProductDetailResponse
 import org.shopflow.backend.presentation.dto.product.ProductSummaryResponse
 import org.shopflow.backend.presentation.dto.product.UpdateProductRequest
+import java.util.UUID
+
+private val CANONICAL_UUID_REGEX =
+    Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+fun resolveCategoryIdOrSlug(idOrSlug: String): Pair<String?, String?> {
+    val trimmed = idOrSlug.trim()
+    if (trimmed.isEmpty()) {
+        throw DomainValidationException("Category identifier cannot be blank.")
+    }
+    return if (CANONICAL_UUID_REGEX.matches(trimmed)) {
+        UUID.fromString(trimmed).toString() to null
+    } else {
+        null to trimmed
+    }
+}
 
 fun CreateCategoryRequest.toCommand(): CreateCategoryCommand =
     CreateCategoryCommand(
@@ -54,7 +71,51 @@ fun CreateProductRequest.toCommand(): CreateProductCommand =
         status = status,
     )
 
-fun UpdateProductRequest.toCommand(productId: String): UpdateProductCommand =
+fun resolveExpectedProductVersion(
+    ifMatchHeader: String?,
+    bodyVersion: Long? = null,
+    queryVersion: Long? = null,
+): Long {
+    val parsedIfMatch =
+        ifMatchHeader?.let { raw ->
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed == "*" || trimmed.contains(",")) {
+                throw DomainValidationException("Invalid If-Match header '$raw'.")
+            }
+            val withoutWeak =
+                if (trimmed.startsWith("W/", ignoreCase = true)) {
+                    trimmed.substring(2).trim()
+                } else {
+                    trimmed
+                }
+            val unwrapped =
+                if (withoutWeak.length >= 2 && withoutWeak.startsWith("\"") && withoutWeak.endsWith("\"")) {
+                    withoutWeak.substring(1, withoutWeak.length - 1).trim()
+                } else {
+                    withoutWeak
+                }
+            unwrapped.toLongOrNull()
+                ?: throw DomainValidationException("Invalid If-Match header '$raw'.")
+        }
+
+    val provided = listOfNotNull(parsedIfMatch, bodyVersion, queryVersion)
+    if (provided.isEmpty()) {
+        throw DomainValidationException("Expected product version is required via 'version' or 'If-Match' header.")
+    }
+    if (provided.any { it < 0 }) {
+        throw DomainValidationException("Expected product version cannot be negative.")
+    }
+    val distinct = provided.distinct()
+    if (distinct.size > 1) {
+        throw DomainValidationException("Conflicting expected version values provided.")
+    }
+    return distinct.single()
+}
+
+fun UpdateProductRequest.toCommand(
+    productId: String,
+    expectedVersion: Long,
+): UpdateProductCommand =
     UpdateProductCommand(
         productId = productId,
         categoryId = categoryId,
@@ -66,6 +127,7 @@ fun UpdateProductRequest.toCommand(productId: String): UpdateProductCommand =
         stockQuantity = stockQuantity,
         imageUrl = imageUrl,
         status = status,
+        expectedVersion = expectedVersion,
     )
 
 fun ProductSummaryDto.toResponse(): ProductSummaryResponse =
@@ -82,6 +144,7 @@ fun ProductSummaryDto.toResponse(): ProductSummaryResponse =
         reviewCount = reviewCount,
         imageUrl = imageUrl,
         status = status,
+        version = version,
     )
 
 fun ProductDetailDto.toResponse(): ProductDetailResponse =
@@ -100,6 +163,7 @@ fun ProductDetailDto.toResponse(): ProductDetailResponse =
         reviewCount = reviewCount,
         imageUrl = imageUrl,
         status = status,
+        version = version,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

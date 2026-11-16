@@ -5,7 +5,11 @@ import org.shopflow.backend.application.dto.product.ProductDetailDto
 import org.shopflow.backend.application.dto.product.ProductSummaryDto
 
 interface ProductQueryService {
-    fun listProducts(query: ListProductsQuery): PageResponseDto<ProductSummaryDto>
+    fun listPublicProducts(query: ListProductsQuery): PageResponseDto<ProductSummaryDto>
 
-    fun findProductDetail(idOrSlug: String): ProductDetailDto?
+    fun findPublicProductDetail(idOrSlug: String): ProductDetailDto?
+
+    fun listAdminProducts(query: ListAdminProductsQuery): PageResponseDto<ProductSummaryDto>
+
+    fun findAdminProductDetail(idOrSlug: String): ProductDetailDto?
 }

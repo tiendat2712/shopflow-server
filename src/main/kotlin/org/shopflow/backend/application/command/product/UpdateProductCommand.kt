@@ -12,5 +12,6 @@ data class UpdateProductCommand(
     val price: BigDecimal,
     val stockQuantity: Int = 0,
     val imageUrl: String? = null,
-    val status: String = "ACTIVE",
+    val status: String? = null,
+    val expectedVersion: Long,
 )

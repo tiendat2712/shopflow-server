@@ -22,8 +22,10 @@ class DeleteProductUseCase(
             productRepository.findById(productId)
                 ?: throw ProductNotFoundException()
 
-        val (archived, archivedEvent) = existing.archive(timeProvider.now())
-        productRepository.save(archived)
-        domainEventPublisher.publish(archivedEvent)
+        val (archived, archivedEvent) = existing.archive(command.expectedVersion, timeProvider.now())
+        if (archivedEvent != null) {
+            productRepository.update(archived)
+            domainEventPublisher.publish(archivedEvent)
+        }
     }
 }

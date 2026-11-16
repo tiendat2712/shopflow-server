@@ -15,7 +15,7 @@ import java.util.UUID
 @Component
 class ProductPersistenceMapper {
     fun toDomain(entity: ProductJpaEntity): Product =
-        Product(
+        Product.rehydrate(
             id = ProductId(UUID.fromString(entity.getId())),
             categoryId = CategoryId(UUID.fromString(entity.categoryId)),
             name = entity.name,
@@ -28,6 +28,7 @@ class ProductPersistenceMapper {
             reviewCount = entity.reviewCount,
             imageUrl = entity.imageUrl,
             status = entity.status,
+            version = entity.version,
             createdAt = entity.createdAt ?: Instant.EPOCH,
             updatedAt = entity.updatedAt ?: Instant.EPOCH,
         )
@@ -46,5 +47,23 @@ class ProductPersistenceMapper {
             reviewCount = domain.reviewCount,
             imageUrl = domain.imageUrl,
             status = domain.status,
+            version = domain.version,
         )
+
+    fun updateEntity(
+        domain: Product,
+        entity: ProductJpaEntity,
+    ) {
+        entity.categoryId = domain.categoryId.value.toString()
+        entity.name = domain.name
+        entity.slug = domain.slug.value
+        entity.sku = domain.sku.value
+        entity.description = domain.description
+        entity.price = domain.price.amount
+        entity.stockQuantity = domain.stockQuantity
+        entity.averageRating = domain.averageRating.value
+        entity.reviewCount = domain.reviewCount
+        entity.imageUrl = domain.imageUrl
+        entity.status = domain.status
+    }
 }

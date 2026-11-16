@@ -1,5 +1,6 @@
 package org.shopflow.backend.application.query.product
 
+import org.shopflow.backend.domain.model.product.ProductStatus
 import java.math.BigDecimal
 
 data class ListProductsQuery(
@@ -12,6 +13,7 @@ data class ListProductsQuery(
     val maxPrice: BigDecimal? = null,
     val minRating: BigDecimal? = null,
     val status: String? = null,
+    val statuses: Set<ProductStatus> = ProductStatus.PUBLIC_STATUSES,
     val sortBy: String = "createdAt",
     val sortDir: String = "desc",
     val sortField: ProductSortField = ProductSortField.CREATED_AT,

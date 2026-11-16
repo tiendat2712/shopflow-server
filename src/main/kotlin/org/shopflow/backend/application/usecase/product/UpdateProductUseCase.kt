@@ -5,6 +5,7 @@ import org.shopflow.backend.application.dto.product.ProductDetailDto
 import org.shopflow.backend.application.dto.product.toDetailDto
 import org.shopflow.backend.domain.event.DomainEventPublisher
 import org.shopflow.backend.domain.exception.CategoryNotFoundException
+import org.shopflow.backend.domain.exception.DomainValidationException
 import org.shopflow.backend.domain.exception.DuplicateProductSkuException
 import org.shopflow.backend.domain.exception.DuplicateProductSlugException
 import org.shopflow.backend.domain.exception.ProductNotFoundException
@@ -33,6 +34,7 @@ class UpdateProductUseCase(
         val existing =
             productRepository.findById(productId)
                 ?: throw ProductNotFoundException()
+        existing.ensureVersionMatches(command.expectedVersion)
 
         val categoryId = CategoryId.fromString(command.categoryId)
         val category =
@@ -49,8 +51,9 @@ class UpdateProductUseCase(
             throw DuplicateProductSlugException("Product slug '${slug.value}' already exists.")
         }
 
-        val (updated, updatedEvent) =
-            existing.update(
+        val now = timeProvider.now()
+        val (catalogUpdated, catalogEvent) =
+            existing.updateCatalogDetails(
                 categoryId = category.id,
                 name = command.name,
                 slug = slug,
@@ -59,12 +62,37 @@ class UpdateProductUseCase(
                 price = Money.of(command.price),
                 stockQuantity = command.stockQuantity,
                 imageUrl = command.imageUrl,
-                status = ProductStatus.fromString(command.status),
-                now = timeProvider.now(),
+                expectedVersion = command.expectedVersion,
+                now = now,
             )
 
-        val saved = productRepository.save(updated)
-        domainEventPublisher.publish(updatedEvent)
+        val requestedStatus =
+            command.status
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let(ProductStatus::fromString)
+
+        val (finalProduct, statusEvent) =
+            if (requestedStatus == null || requestedStatus == catalogUpdated.status) {
+                catalogUpdated to null
+            } else {
+                when (requestedStatus) {
+                    ProductStatus.ACTIVE -> catalogUpdated.publish(command.expectedVersion, now)
+                    ProductStatus.OUT_OF_STOCK -> catalogUpdated.markOutOfStock(command.expectedVersion, now)
+                    ProductStatus.ARCHIVED ->
+                        throw DomainValidationException("Cannot archive product via catalog update. Use the archive action instead.")
+                    ProductStatus.DRAFT ->
+                        throw DomainValidationException("Cannot transition product status from ${catalogUpdated.status} to DRAFT.")
+                }
+            }
+
+        val events = listOfNotNull(catalogEvent, statusEvent)
+        if (events.isEmpty()) {
+            return existing.toDetailDto(category)
+        }
+
+        val saved = productRepository.update(finalProduct)
+        events.forEach(domainEventPublisher::publish)
         return saved.toDetailDto(category)
     }
 }

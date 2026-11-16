@@ -9,6 +9,8 @@ import org.shopflow.backend.domain.model.product.Slug
 interface ProductRepository {
     fun save(product: Product): Product
 
+    fun update(product: Product): Product
+
     fun saveAll(products: Collection<Product>): List<Product>
 
     fun findById(id: ProductId): Product?

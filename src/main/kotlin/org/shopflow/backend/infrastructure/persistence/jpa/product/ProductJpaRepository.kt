@@ -33,8 +33,15 @@ interface ProductJpaRepository :
         @Param("slugs") slugs: Collection<String>,
     ): Set<String>
 
-    @Modifying
-    @Query("UPDATE ProductJpaEntity p SET p.imageUrl = :imageUrl WHERE p.categoryId = :categoryId")
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(
+        """
+        UPDATE ProductJpaEntity p
+        SET p.imageUrl = :imageUrl,
+            p.version = COALESCE(p.version, 0) + 1
+        WHERE p.categoryId = :categoryId
+        """,
+    )
     fun updateImageUrlByCategoryId(
         @Param("categoryId") categoryId: String,
         @Param("imageUrl") imageUrl: String,
