@@ -7,7 +7,12 @@ sealed class DomainException(
 
 class UserAlreadyExistsException(
     message: String = "A user with that email already exists.",
-) : DomainException(message)
+    cause: Throwable? = null,
+) : DomainException(message, cause) {
+    companion object {
+        const val ERROR_CODE = "USER_ALREADY_EXISTS"
+    }
+}
 
 class InvalidCredentialsException(
     message: String = "Invalid credentials.",
@@ -23,7 +28,11 @@ class UserNotFoundException(
 
 class AccountInactiveException(
     message: String = "User account is inactive.",
-) : DomainException(message)
+) : DomainException(message) {
+    companion object {
+        const val ERROR_CODE = "ACCOUNT_INACTIVE"
+    }
+}
 
 class DomainValidationException(
     message: String,
@@ -43,7 +52,12 @@ class CategoryNotFoundException(
 
 class DuplicateCategorySlugException(
     message: String = "A category with that slug already exists.",
-) : DomainException(message)
+    cause: Throwable? = null,
+) : DomainException(message, cause) {
+    companion object {
+        const val ERROR_CODE = "DUPLICATE_CATEGORY_SLUG"
+    }
+}
 
 class ProductNotFoundException(
     message: String = "Product not found.",
@@ -51,11 +65,30 @@ class ProductNotFoundException(
 
 class DuplicateProductSkuException(
     message: String = "A product with that SKU already exists.",
-) : DomainException(message)
+    cause: Throwable? = null,
+) : DomainException(message, cause) {
+    companion object {
+        const val ERROR_CODE = "DUPLICATE_PRODUCT_SKU"
+    }
+}
 
 class DuplicateProductSlugException(
     message: String = "A product with that slug already exists.",
-) : DomainException(message)
+    cause: Throwable? = null,
+) : DomainException(message, cause) {
+    companion object {
+        const val ERROR_CODE = "DUPLICATE_PRODUCT_SLUG"
+    }
+}
+
+class ProductConcurrencyConflictException(
+    message: String = "Product was modified by another transaction. Please reload the latest version and try again.",
+    cause: Throwable? = null,
+) : DomainException(message, cause) {
+    companion object {
+        const val ERROR_CODE = "PRODUCT_CONCURRENCY_CONFLICT"
+    }
+}
 
 class InvalidMediaFileException(
     message: String,

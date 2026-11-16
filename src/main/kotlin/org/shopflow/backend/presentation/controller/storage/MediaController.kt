@@ -4,6 +4,8 @@ import org.shopflow.backend.application.command.storage.DeleteImageCommand
 import org.shopflow.backend.application.command.storage.UploadImageCommand
 import org.shopflow.backend.application.usecase.storage.DeleteImageUseCase
 import org.shopflow.backend.application.usecase.storage.UploadImageUseCase
+import org.shopflow.backend.presentation.dto.ApiCode
+import org.shopflow.backend.presentation.dto.ApiResponse
 import org.shopflow.backend.presentation.dto.storage.UploadedImageResponse
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
@@ -30,7 +32,7 @@ class MediaController(
         authentication: Authentication,
         @RequestParam("file") file: MultipartFile,
         @RequestParam("folder", defaultValue = "products") folder: String,
-    ): UploadedImageResponse {
+    ): ApiResponse<UploadedImageResponse> {
         val normalizedFolder = folder.trim().lowercase()
         if (normalizedFolder in CATALOG_WRITE_FOLDERS) {
             val canWriteProductMedia = authentication.authorities.any { it.authority == "PRODUCT_WRITE" }
@@ -50,9 +52,14 @@ class MediaController(
                 ),
             )
 
-        return UploadedImageResponse(
-            url = uploaded.url,
-            publicId = uploaded.publicId,
+        return ApiResponse.ok(
+            code = ApiCode.MEDIA_UPLOAD_SUCCESS,
+            message = "Image uploaded successfully.",
+            result =
+                UploadedImageResponse(
+                    url = uploaded.url,
+                    publicId = uploaded.publicId,
+                ),
         )
     }
 

@@ -1,6 +1,7 @@
 package org.shopflow.backend.infrastructure.persistence.repository.auth
 
 import org.shopflow.backend.domain.exception.RoleNotFoundException
+import org.shopflow.backend.domain.exception.UserAlreadyExistsException
 import org.shopflow.backend.domain.model.auth.Email
 import org.shopflow.backend.domain.model.auth.Role
 import org.shopflow.backend.domain.model.auth.User
@@ -10,6 +11,8 @@ import org.shopflow.backend.infrastructure.persistence.entity.auth.RoleJpaEntity
 import org.shopflow.backend.infrastructure.persistence.jpa.auth.RoleJpaRepository
 import org.shopflow.backend.infrastructure.persistence.jpa.auth.UserJpaRepository
 import org.shopflow.backend.infrastructure.persistence.mapper.auth.UserPersistenceMapper
+import org.shopflow.backend.infrastructure.persistence.support.UniqueConstraintViolationTranslator
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Transactional
 
@@ -18,6 +21,7 @@ class UserRepositoryImpl(
     private val jpaRepository: UserJpaRepository,
     private val roleJpaRepository: RoleJpaRepository,
     private val mapper: UserPersistenceMapper,
+    private val constraintTranslator: UniqueConstraintViolationTranslator,
 ) : UserRepository {
     override fun findByEmail(email: Email): User? = jpaRepository.findByEmail(email.value)?.let(mapper::toDomain)
 
@@ -37,6 +41,7 @@ class UserRepositoryImpl(
         return jpaRepository.findExistingIds(rawIds).mapTo(hashSetOf()) { UserId.fromString(it) }
     }
 
+    @Transactional
     override fun save(user: User): User {
         val resolvedRoles = resolveRoles(user.roles)
         val existing = jpaRepository.findById(user.id.value.toString()).orElse(null)
@@ -57,7 +62,11 @@ class UserRepositoryImpl(
             } else {
                 mapper.toEntity(user, resolvedRoles)
             }
-        return mapper.toDomain(jpaRepository.saveAndFlush(entity))
+        return try {
+            mapper.toDomain(jpaRepository.saveAndFlush(entity))
+        } catch (ex: DataIntegrityViolationException) {
+            translateUserIntegrityViolation(ex)
+        }
     }
 
     @Transactional
@@ -79,7 +88,11 @@ class UserRepositoryImpl(
                     }
                 mapper.toEntity(user, resolvedRoles)
             }
-        return jpaRepository.saveAllAndFlush(entities).map(mapper::toDomain)
+        return try {
+            jpaRepository.saveAllAndFlush(entities).map(mapper::toDomain)
+        } catch (ex: DataIntegrityViolationException) {
+            translateUserIntegrityViolation(ex)
+        }
     }
 
     private fun resolveRoles(roles: Set<Role>): MutableSet<RoleJpaEntity> {
@@ -94,5 +107,17 @@ class UserRepositoryImpl(
             resolved.add(found)
         }
         return resolved
+    }
+
+    private fun translateUserIntegrityViolation(ex: DataIntegrityViolationException): Nothing {
+        if (constraintTranslator.resolveViolatedColumn(ex, TABLE_NAME) == EMAIL_COLUMN) {
+            throw UserAlreadyExistsException(cause = ex)
+        }
+        throw ex
+    }
+
+    companion object {
+        private const val TABLE_NAME = "users"
+        private const val EMAIL_COLUMN = "email"
     }
 }

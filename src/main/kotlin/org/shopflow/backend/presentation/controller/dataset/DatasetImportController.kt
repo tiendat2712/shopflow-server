@@ -5,6 +5,8 @@ import org.shopflow.backend.application.command.dataset.ImportKaggleDatasetComma
 import org.shopflow.backend.application.usecase.dataset.ImportKaggleDatasetUseCase
 import org.shopflow.backend.presentation.converter.toCommand
 import org.shopflow.backend.presentation.converter.toResponse
+import org.shopflow.backend.presentation.dto.ApiCode
+import org.shopflow.backend.presentation.dto.ApiResponse
 import org.shopflow.backend.presentation.dto.dataset.DatasetImportResponse
 import org.shopflow.backend.presentation.dto.dataset.ImportKaggleDatasetRequest
 import org.springframework.security.access.prepost.PreAuthorize
@@ -22,8 +24,12 @@ class DatasetImportController(
     @PreAuthorize("hasRole('ADMIN')")
     fun importKaggleDataset(
         @Valid @RequestBody(required = false) request: ImportKaggleDatasetRequest? = null,
-    ): DatasetImportResponse {
+    ): ApiResponse<DatasetImportResponse> {
         val command = request?.toCommand() ?: ImportKaggleDatasetCommand()
-        return importKaggleDatasetUseCase.execute(command).toResponse()
+        return ApiResponse.ok(
+            code = ApiCode.DATASET_IMPORT_SUCCESS,
+            message = "Dataset imported successfully.",
+            result = importKaggleDatasetUseCase.execute(command).toResponse(),
+        )
     }
 }

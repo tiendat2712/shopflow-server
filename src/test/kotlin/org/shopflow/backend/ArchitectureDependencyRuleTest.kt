@@ -108,6 +108,27 @@ class ArchitectureDependencyRuleTest {
     }
 
     @Test
+    fun `infrastructure layer must not depend on presentation layer`() {
+        val infrastructureDir = sourceRoot.resolve("infrastructure")
+        val kotlinFiles = listKotlinFiles(infrastructureDir)
+        assertTrue(kotlinFiles.isNotEmpty(), "Expected Kotlin files under $infrastructureDir")
+
+        val violations = findImportViolations(kotlinFiles, listOf("import org.shopflow.backend.presentation."))
+        assertTrue(
+            violations.isEmpty(),
+            "Infrastructure layer must not import presentation:\n${violations.joinToString("\n")}",
+        )
+
+        noClasses()
+            .that()
+            .resideInAPackage("..infrastructure..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage("..presentation..")
+            .check(importedClasses)
+    }
+
+    @Test
     fun `domain classes must not be annotated with Spring or Jakarta stereotypes`() {
         noClasses()
             .that()

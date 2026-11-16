@@ -12,6 +12,8 @@ import org.shopflow.backend.presentation.converter.toCommand
 import org.shopflow.backend.presentation.converter.toLogoutCommand
 import org.shopflow.backend.presentation.converter.toRefreshCommand
 import org.shopflow.backend.presentation.converter.toResponse
+import org.shopflow.backend.presentation.dto.ApiCode
+import org.shopflow.backend.presentation.dto.ApiResponse
 import org.shopflow.backend.presentation.dto.auth.AuthResponse
 import org.shopflow.backend.presentation.dto.auth.LoginRequest
 import org.shopflow.backend.presentation.dto.auth.RefreshTokenRequest
@@ -42,17 +44,32 @@ class AuthController(
     @ResponseStatus(HttpStatus.CREATED)
     fun register(
         @Valid @RequestBody body: RegisterRequest,
-    ): UserProfileResponse = registerUseCase.execute(body.toCommand()).toResponse()
+    ): ApiResponse<UserProfileResponse> =
+        ApiResponse.created(
+            code = ApiCode.AUTH_REGISTER_SUCCESS,
+            message = "User registered successfully.",
+            result = registerUseCase.execute(body.toCommand()).toResponse(),
+        )
 
     @PostMapping("/login")
     fun login(
         @Valid @RequestBody body: LoginRequest,
-    ): AuthResponse = loginUseCase.execute(body.toCommand()).toResponse()
+    ): ApiResponse<AuthResponse> =
+        ApiResponse.ok(
+            code = ApiCode.AUTH_LOGIN_SUCCESS,
+            message = "Login successful.",
+            result = loginUseCase.execute(body.toCommand()).toResponse(),
+        )
 
     @PostMapping("/refresh")
     fun refresh(
         @Valid @RequestBody body: RefreshTokenRequest,
-    ): AuthResponse = refreshTokenUseCase.execute(body.toRefreshCommand()).toResponse()
+    ): ApiResponse<AuthResponse> =
+        ApiResponse.ok(
+            code = ApiCode.AUTH_REFRESH_SUCCESS,
+            message = "Token refreshed successfully.",
+            result = refreshTokenUseCase.execute(body.toRefreshCommand()).toResponse(),
+        )
 
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -63,17 +80,27 @@ class AuthController(
     }
 
     @GetMapping("/me")
-    fun getCurrentUser(authentication: Authentication): UserProfileResponse =
-        getCurrentUserUseCase
-            .execute(GetCurrentUserQuery(authentication.name))
-            .toResponse()
+    fun getCurrentUser(authentication: Authentication): ApiResponse<UserProfileResponse> =
+        ApiResponse.ok(
+            code = ApiCode.AUTH_ME_SUCCESS,
+            message = "Current user profile retrieved successfully.",
+            result =
+                getCurrentUserUseCase
+                    .execute(GetCurrentUserQuery(authentication.name))
+                    .toResponse(),
+        )
 
     @PutMapping("/me/profile")
     fun updateCurrentUserProfile(
         authentication: Authentication,
         @Valid @RequestBody request: UpdateUserProfileRequest,
-    ): UserProfileResponse =
-        updateUserProfileUseCase
-            .execute(request.toCommand(authentication.name))
-            .toResponse()
+    ): ApiResponse<UserProfileResponse> =
+        ApiResponse.ok(
+            code = ApiCode.AUTH_PROFILE_UPDATE_SUCCESS,
+            message = "User profile updated successfully.",
+            result =
+                updateUserProfileUseCase
+                    .execute(request.toCommand(authentication.name))
+                    .toResponse(),
+        )
 }

@@ -77,11 +77,13 @@ class AuthEndToEndFlowTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(registerPayload),
                     ).andExpect(status().isCreated)
-                    .andExpect(jsonPath("$.email").value(testEmail))
-                    .andExpect(jsonPath("$.status").value("ACTIVE"))
+                    .andExpect(jsonPath("$.code").value("AUTH_REGISTER_SUCCESS"))
+                    .andExpect(jsonPath("$.status").value(201))
+                    .andExpect(jsonPath("$.result.email").value(testEmail))
+                    .andExpect(jsonPath("$.result.status").value("ACTIVE"))
                     .andReturn()
 
-            val registerJson = objectMapper.readTree(registerResult.response.contentAsString)
+            val registerJson = objectMapper.readTree(registerResult.response.contentAsString)["result"]
             registeredUserId = registerJson["id"].asString()
             assertTrue(registeredUserId.isNotBlank())
             val registeredRoles = registerJson["roles"].mapTo(linkedSetOf()) { it.asString() }
@@ -102,9 +104,11 @@ class AuthEndToEndFlowTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(loginPayload),
                     ).andExpect(status().isOk)
+                    .andExpect(jsonPath("$.code").value("AUTH_LOGIN_SUCCESS"))
+                    .andExpect(jsonPath("$.status").value(200))
                     .andReturn()
 
-            val loginJson = objectMapper.readTree(loginResult.response.contentAsString)
+            val loginJson = objectMapper.readTree(loginResult.response.contentAsString)["result"]
             val accessToken = loginJson["accessToken"].asString()
             val refreshToken = loginJson["refreshToken"].asString()
             assertTrue(accessToken.isNotBlank())
@@ -114,6 +118,8 @@ class AuthEndToEndFlowTest {
             mockMvc
                 .perform(get("/api/auth/me"))
                 .andExpect(status().isUnauthorized)
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+                .andExpect(jsonPath("$.status").value(401))
 
             val meResult =
                 mockMvc
@@ -121,11 +127,13 @@ class AuthEndToEndFlowTest {
                         get("/api/auth/me")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer $accessToken"),
                     ).andExpect(status().isOk)
-                    .andExpect(jsonPath("$.id").value(registeredUserId))
-                    .andExpect(jsonPath("$.email").value(testEmail))
+                    .andExpect(jsonPath("$.code").value("AUTH_ME_SUCCESS"))
+                    .andExpect(jsonPath("$.status").value(200))
+                    .andExpect(jsonPath("$.result.id").value(registeredUserId))
+                    .andExpect(jsonPath("$.result.email").value(testEmail))
                     .andReturn()
 
-            val meJson = objectMapper.readTree(meResult.response.contentAsString)
+            val meJson = objectMapper.readTree(meResult.response.contentAsString)["result"]
             val meRoles = meJson["roles"].mapTo(linkedSetOf()) { it.asString() }
             val mePermissions = meJson["permissions"].mapTo(linkedSetOf()) { it.asString() }
             assertEquals(setOf(Role.ROLE_CUSTOMER), meRoles)
@@ -168,6 +176,8 @@ class AuthEndToEndFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(invalidProfilePayload),
                 ).andExpect(status().isBadRequest)
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.errors[0].field").value("fullName"))
 
             mockMvc
                 .perform(
@@ -176,24 +186,26 @@ class AuthEndToEndFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(updateProfilePayload),
                 ).andExpect(status().isOk)
-                .andExpect(jsonPath("$.id").value(registeredUserId))
-                .andExpect(jsonPath("$.email").value(testEmail))
-                .andExpect(jsonPath("$.fullName").value("Nguyen Van A"))
-                .andExpect(jsonPath("$.phoneNumber").value("0901234567"))
-                .andExpect(jsonPath("$.city").value("Ho Chi Minh"))
-                .andExpect(jsonPath("$.address").value("123 Le Loi, District 1"))
-                .andExpect(jsonPath("$.avatarUrl").value("https://cdn.shopflow.org/avatars/u1.png"))
+                .andExpect(jsonPath("$.code").value("AUTH_PROFILE_UPDATE_SUCCESS"))
+                .andExpect(jsonPath("$.status").value(200))
+                .andExpect(jsonPath("$.result.id").value(registeredUserId))
+                .andExpect(jsonPath("$.result.email").value(testEmail))
+                .andExpect(jsonPath("$.result.fullName").value("Nguyen Van A"))
+                .andExpect(jsonPath("$.result.phoneNumber").value("0901234567"))
+                .andExpect(jsonPath("$.result.city").value("Ho Chi Minh"))
+                .andExpect(jsonPath("$.result.address").value("123 Le Loi, District 1"))
+                .andExpect(jsonPath("$.result.avatarUrl").value("https://cdn.shopflow.org/avatars/u1.png"))
 
             mockMvc
                 .perform(
                     get("/api/auth/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer $accessToken"),
                 ).andExpect(status().isOk)
-                .andExpect(jsonPath("$.fullName").value("Nguyen Van A"))
-                .andExpect(jsonPath("$.phoneNumber").value("0901234567"))
-                .andExpect(jsonPath("$.city").value("Ho Chi Minh"))
-                .andExpect(jsonPath("$.address").value("123 Le Loi, District 1"))
-                .andExpect(jsonPath("$.avatarUrl").value("https://cdn.shopflow.org/avatars/u1.png"))
+                .andExpect(jsonPath("$.result.fullName").value("Nguyen Van A"))
+                .andExpect(jsonPath("$.result.phoneNumber").value("0901234567"))
+                .andExpect(jsonPath("$.result.city").value("Ho Chi Minh"))
+                .andExpect(jsonPath("$.result.address").value("123 Le Loi, District 1"))
+                .andExpect(jsonPath("$.result.avatarUrl").value("https://cdn.shopflow.org/avatars/u1.png"))
 
             val dbProfileAudit =
                 jdbcTemplate.queryForMap(
@@ -209,8 +221,6 @@ class AuthEndToEndFlowTest {
             assertEquals(registeredUserId, dbProfileAudit["updated_by"])
 
             // 4. Refresh token rotation -> 200 OK & old refresh token becomes invalid (anti-reuse -> 401)
-            // JWT numeric dates (iat/exp) have 1-second resolution per RFC 7519; advance past the second boundary
-            Thread.sleep(1_100)
             val refreshPayload = objectMapper.writeValueAsString(mapOf("refreshToken" to refreshToken))
             val refreshResult =
                 mockMvc
@@ -219,9 +229,11 @@ class AuthEndToEndFlowTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(refreshPayload),
                     ).andExpect(status().isOk)
+                    .andExpect(jsonPath("$.code").value("AUTH_REFRESH_SUCCESS"))
+                    .andExpect(jsonPath("$.status").value(200))
                     .andReturn()
 
-            val refreshedJson = objectMapper.readTree(refreshResult.response.contentAsString)
+            val refreshedJson = objectMapper.readTree(refreshResult.response.contentAsString)["result"]
             val rotatedAccessToken = refreshedJson["accessToken"].asString()
             val rotatedRefreshToken = refreshedJson["refreshToken"].asString()
             assertTrue(rotatedAccessToken.isNotBlank())
@@ -235,18 +247,20 @@ class AuthEndToEndFlowTest {
                         .content(refreshPayload),
                 ).andExpect(status().isUnauthorized)
                 .andExpect(jsonPath("$.status").value(401))
-                .andExpect(jsonPath("$.error").value("Unauthorized"))
+                .andExpect(jsonPath("$.code").value("INVALID_TOKEN"))
+                .andExpect(jsonPath("$.result").doesNotExist())
                 .andExpect(jsonPath("$.message").isNotEmpty)
 
-            // 5. Call Staff/Admin protected endpoints with ROLE_CUSTOMER token -> 403 Forbidden ErrorResponse
+            // 5. Call Staff/Admin protected endpoints with ROLE_CUSTOMER token -> 403 Forbidden ApiResponse
             mockMvc
                 .perform(
                     get("/api/test-e2e-protected/staff-products")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer $rotatedAccessToken"),
                 ).andExpect(status().isForbidden)
                 .andExpect(jsonPath("$.status").value(403))
-                .andExpect(jsonPath("$.error").value("Forbidden"))
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
                 .andExpect(jsonPath("$.message").isNotEmpty)
+                .andExpect(jsonPath("$.errors[0].code").value("ACCESS_DENIED"))
                 .andExpect(jsonPath("$.timestamp").isNotEmpty)
 
             mockMvc
@@ -255,18 +269,21 @@ class AuthEndToEndFlowTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer $rotatedAccessToken"),
                 ).andExpect(status().isForbidden)
                 .andExpect(jsonPath("$.status").value(403))
-                .andExpect(jsonPath("$.error").value("Forbidden"))
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"))
                 .andExpect(jsonPath("$.message").isNotEmpty)
                 .andExpect(jsonPath("$.timestamp").isNotEmpty)
 
-            // 6. Logout revokes rotated refresh token -> 204 No Content & subsequent refresh fails with 401
+            // 6. Logout revokes rotated refresh token -> 204 No Content & empty body & subsequent refresh fails with 401
             val logoutPayload = objectMapper.writeValueAsString(mapOf("refreshToken" to rotatedRefreshToken))
-            mockMvc
-                .perform(
-                    post("/api/auth/logout")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(logoutPayload),
-                ).andExpect(status().isNoContent)
+            val logoutRes =
+                mockMvc
+                    .perform(
+                        post("/api/auth/logout")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(logoutPayload),
+                    ).andExpect(status().isNoContent)
+                    .andReturn()
+            assertEquals("", logoutRes.response.contentAsString)
 
             mockMvc
                 .perform(
@@ -275,20 +292,119 @@ class AuthEndToEndFlowTest {
                         .content(logoutPayload),
                 ).andExpect(status().isUnauthorized)
                 .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.code").value("INVALID_TOKEN"))
         } finally {
-            SecurityContextHolder.clearContext()
-            val userIdToDelete =
-                registeredUserId ?: jdbcTemplate
-                    .query(
-                        "SELECT id FROM users WHERE email = ?",
-                        { rs, _ -> rs.getString("id") },
-                        testEmail,
-                    ).firstOrNull()
-            if (userIdToDelete != null) {
-                jdbcTemplate.update("DELETE FROM refresh_tokens WHERE user_id = ?", userIdToDelete)
-                jdbcTemplate.update("DELETE FROM user_roles WHERE user_id = ?", userIdToDelete)
-                jdbcTemplate.update("DELETE FROM users WHERE id = ?", userIdToDelete)
-            }
+            cleanupTestUser(registeredUserId, testEmail)
+        }
+    }
+
+    @Test
+    fun `consecutive logins and immediate refresh do not hit unique constraint and reject rotated token`() {
+        val testEmail = "rapid-refresh-${UUID.randomUUID()}@shopflow.org"
+        val rawPassword = "Password123!"
+        var registeredUserId: String? = null
+
+        try {
+            val registerPayload =
+                objectMapper.writeValueAsString(
+                    mapOf(
+                        "email" to testEmail,
+                        "password" to rawPassword,
+                    ),
+                )
+            val registerResult =
+                mockMvc
+                    .perform(
+                        post("/api/auth/register")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(registerPayload),
+                    ).andExpect(status().isCreated)
+                    .andReturn()
+            registeredUserId = objectMapper.readTree(registerResult.response.contentAsString)["result"]["id"].asString()
+
+            val loginPayload =
+                objectMapper.writeValueAsString(
+                    mapOf(
+                        "email" to testEmail,
+                        "password" to rawPassword,
+                    ),
+                )
+            val login1Result =
+                mockMvc
+                    .perform(
+                        post("/api/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(loginPayload),
+                    ).andExpect(status().isOk)
+                    .andReturn()
+            val login2Result =
+                mockMvc
+                    .perform(
+                        post("/api/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(loginPayload),
+                    ).andExpect(status().isOk)
+                    .andReturn()
+
+            val refreshToken1 = objectMapper.readTree(login1Result.response.contentAsString)["result"]["refreshToken"].asString()
+            val refreshToken2 = objectMapper.readTree(login2Result.response.contentAsString)["result"]["refreshToken"].asString()
+            assertTrue(refreshToken1.isNotBlank())
+            assertTrue(refreshToken2.isNotBlank())
+            assertNotEquals(refreshToken1, refreshToken2)
+
+            val tokenCount =
+                jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM refresh_tokens WHERE user_id = ?",
+                    Int::class.java,
+                    registeredUserId,
+                ) ?: 0
+            assertEquals(2, tokenCount)
+
+            val refresh2Payload = objectMapper.writeValueAsString(mapOf("refreshToken" to refreshToken2))
+            val rotated2Result =
+                mockMvc
+                    .perform(
+                        post("/api/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(refresh2Payload),
+                    ).andExpect(status().isOk)
+                    .andReturn()
+            val rotatedRefreshToken =
+                objectMapper.readTree(rotated2Result.response.contentAsString)["result"]["refreshToken"].asString()
+            assertTrue(rotatedRefreshToken.isNotBlank())
+            assertNotEquals(refreshToken2, rotatedRefreshToken)
+            assertNotEquals(refreshToken1, rotatedRefreshToken)
+
+            mockMvc
+                .perform(
+                    post("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(refresh2Payload),
+                ).andExpect(status().isUnauthorized)
+                .andExpect(jsonPath("$.status").value(401))
+
+            val refresh1Payload = objectMapper.writeValueAsString(mapOf("refreshToken" to refreshToken1))
+            val rotated1Result =
+                mockMvc
+                    .perform(
+                        post("/api/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(refresh1Payload),
+                    ).andExpect(status().isOk)
+                    .andReturn()
+            val rotatedFirstSessionToken =
+                objectMapper.readTree(rotated1Result.response.contentAsString)["result"]["refreshToken"].asString()
+            assertNotEquals(refreshToken1, rotatedFirstSessionToken)
+
+            mockMvc
+                .perform(
+                    post("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(refresh1Payload),
+                ).andExpect(status().isUnauthorized)
+                .andExpect(jsonPath("$.status").value(401))
+        } finally {
+            cleanupTestUser(registeredUserId, testEmail)
         }
     }
 
@@ -314,12 +430,14 @@ class AuthEndToEndFlowTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(payload),
                     ).andExpect(status().isCreated)
-                    .andExpect(jsonPath("$.email").value(testEmail))
-                    .andExpect(jsonPath("$.fullName").value("Tran Thi B"))
-                    .andExpect(jsonPath("$.city").value("Da Nang"))
+                    .andExpect(jsonPath("$.code").value("AUTH_REGISTER_SUCCESS"))
+                    .andExpect(jsonPath("$.status").value(201))
+                    .andExpect(jsonPath("$.result.email").value(testEmail))
+                    .andExpect(jsonPath("$.result.fullName").value("Tran Thi B"))
+                    .andExpect(jsonPath("$.result.city").value("Da Nang"))
                     .andReturn()
 
-            registeredUserId = objectMapper.readTree(result.response.contentAsString)["id"].asString()
+            registeredUserId = objectMapper.readTree(result.response.contentAsString)["result"]["id"].asString()
             val dbRow =
                 jdbcTemplate.queryForMap(
                     "SELECT full_name, city, created_by FROM users WHERE id = ?",
@@ -329,18 +447,26 @@ class AuthEndToEndFlowTest {
             assertEquals("Da Nang", dbRow["city"])
             assertEquals("SYSTEM", dbRow["created_by"])
         } finally {
-            val userIdToDelete =
-                registeredUserId ?: jdbcTemplate
-                    .query(
-                        "SELECT id FROM users WHERE email = ?",
-                        { rs, _ -> rs.getString("id") },
-                        testEmail,
-                    ).firstOrNull()
-            if (userIdToDelete != null) {
-                jdbcTemplate.update("DELETE FROM refresh_tokens WHERE user_id = ?", userIdToDelete)
-                jdbcTemplate.update("DELETE FROM user_roles WHERE user_id = ?", userIdToDelete)
-                jdbcTemplate.update("DELETE FROM users WHERE id = ?", userIdToDelete)
-            }
+            cleanupTestUser(registeredUserId, testEmail)
+        }
+    }
+
+    private fun cleanupTestUser(
+        registeredUserId: String?,
+        email: String,
+    ) {
+        SecurityContextHolder.clearContext()
+        val userIdToDelete =
+            registeredUserId ?: jdbcTemplate
+                .query(
+                    "SELECT id FROM users WHERE email = ?",
+                    { rs, _ -> rs.getString("id") },
+                    email,
+                ).firstOrNull()
+        if (userIdToDelete != null) {
+            jdbcTemplate.update("DELETE FROM refresh_tokens WHERE user_id = ?", userIdToDelete)
+            jdbcTemplate.update("DELETE FROM user_roles WHERE user_id = ?", userIdToDelete)
+            jdbcTemplate.update("DELETE FROM users WHERE id = ?", userIdToDelete)
         }
     }
 
