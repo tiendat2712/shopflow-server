@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.Date
+import java.util.UUID
 
 @Service
 class JwtService(
@@ -34,6 +35,7 @@ class JwtService(
         val builder =
             Jwts
                 .builder()
+                .id(UUID.randomUUID().toString())
                 .subject(userId.value.toString())
                 .claim("type", type)
                 .issuedAt(now)
@@ -106,6 +108,7 @@ class JwtService(
         expectedType: String,
     ): Boolean {
         val claims = parseAllClaims(token) ?: return false
+        if (claims.subject.isNullOrBlank()) return false
         val tokenType = claims["type"] as? String ?: return false
         return tokenType == expectedType
     }

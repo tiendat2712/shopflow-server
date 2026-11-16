@@ -11,8 +11,11 @@ import org.shopflow.backend.application.query.auth.GetCurrentUserQuery
 import org.shopflow.backend.application.usecase.auth.GetCurrentUserUseCase
 import org.shopflow.backend.application.usecase.auth.LoginUseCase
 import org.shopflow.backend.application.usecase.auth.RegisterUseCase
+import org.shopflow.backend.domain.model.auth.Email
+import org.shopflow.backend.domain.model.auth.HashedPassword
 import org.shopflow.backend.domain.model.auth.Permission
 import org.shopflow.backend.domain.model.auth.Role
+import org.shopflow.backend.domain.model.auth.User
 import org.shopflow.backend.domain.model.auth.UserId
 import org.shopflow.backend.domain.model.auth.UserStatus
 import org.shopflow.backend.domain.repository.auth.RoleRepository
@@ -41,6 +44,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.context.WebApplicationContext
+import java.time.Instant
 import java.util.UUID
 
 @SpringBootTest
@@ -235,52 +239,89 @@ class RbacAndAuditingIntegrationTest {
         val staffRole = roleRepository.findByName(Role.ROLE_STAFF)!!
         val adminRole = roleRepository.findByName(Role.ROLE_ADMIN)!!
 
-        val customerToken =
-            tokenProvider.generateAccessToken(
-                userId = UserId.generate(),
-                roles = setOf(customerRole.name),
-                permissions = customerRole.getPermissionCodes(),
-            )
-        val staffToken =
-            tokenProvider.generateAccessToken(
-                userId = UserId.generate(),
-                roles = setOf(staffRole.name),
-                permissions = staffRole.getPermissionCodes(),
-            )
-        val adminToken =
-            tokenProvider.generateAccessToken(
-                userId = UserId.generate(),
-                roles = setOf(adminRole.name),
-                permissions = adminRole.getPermissionCodes(),
-            )
+        val now = Instant.now()
+        val createdUserIds = mutableListOf<String>()
 
-        mockMvc
-            .perform(get("/api/test-rbac/product-write"))
-            .andExpect(status().isUnauthorized)
+        fun saveActor(
+            label: String,
+            role: Role,
+        ): User {
+            val id = UserId.generate()
+            val saved =
+                userRepository.save(
+                    User(
+                        id = id,
+                        email = Email.of("rbac-$label-${id.value}@shopflow.org"),
+                        hashedPassword = HashedPassword("rbac-unused-password-hash"),
+                        roles = setOf(role),
+                        status = UserStatus.ACTIVE,
+                        createdAt = now,
+                        updatedAt = now,
+                    ),
+                )
+            createdUserIds += saved.id.value.toString()
+            return saved
+        }
 
-        mockMvc
-            .perform(
-                get("/api/test-rbac/product-write")
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer $customerToken"),
-            ).andExpect(status().isForbidden)
+        try {
+            val customerUser = saveActor("customer", customerRole)
+            val staffUser = saveActor("staff", staffRole)
+            val adminUser = saveActor("admin", adminRole)
 
-        mockMvc
-            .perform(
-                get("/api/test-rbac/product-write")
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer $staffToken"),
-            ).andExpect(status().isOk)
+            val customerToken =
+                tokenProvider.generateAccessToken(
+                    userId = customerUser.id,
+                    roles = setOf(customerRole.name),
+                    permissions = customerRole.getPermissionCodes(),
+                )
+            val staffToken =
+                tokenProvider.generateAccessToken(
+                    userId = staffUser.id,
+                    roles = setOf(staffRole.name),
+                    permissions = staffRole.getPermissionCodes(),
+                )
+            val adminToken =
+                tokenProvider.generateAccessToken(
+                    userId = adminUser.id,
+                    roles = setOf(adminRole.name),
+                    permissions = adminRole.getPermissionCodes(),
+                )
 
-        mockMvc
-            .perform(
-                get("/api/test-rbac/admin-only")
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer $staffToken"),
-            ).andExpect(status().isForbidden)
+            mockMvc
+                .perform(get("/api/test-rbac/product-write"))
+                .andExpect(status().isUnauthorized)
 
-        mockMvc
-            .perform(
-                get("/api/test-rbac/admin-only")
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer $adminToken"),
-            ).andExpect(status().isOk)
+            mockMvc
+                .perform(
+                    get("/api/test-rbac/product-write")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer $customerToken"),
+                ).andExpect(status().isForbidden)
+
+            mockMvc
+                .perform(
+                    get("/api/test-rbac/product-write")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer $staffToken"),
+                ).andExpect(status().isOk)
+
+            mockMvc
+                .perform(
+                    get("/api/test-rbac/admin-only")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer $staffToken"),
+                ).andExpect(status().isForbidden)
+
+            mockMvc
+                .perform(
+                    get("/api/test-rbac/admin-only")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer $adminToken"),
+                ).andExpect(status().isOk)
+        } finally {
+            SecurityContextHolder.clearContext()
+            createdUserIds.forEach { userId ->
+                jdbcTemplate.update("DELETE FROM refresh_tokens WHERE user_id = ?", userId)
+                jdbcTemplate.update("DELETE FROM user_roles WHERE user_id = ?", userId)
+                jdbcTemplate.update("DELETE FROM users WHERE id = ?", userId)
+            }
+        }
     }
 
     @RestController

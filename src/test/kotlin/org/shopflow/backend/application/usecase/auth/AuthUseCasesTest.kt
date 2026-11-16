@@ -1,9 +1,13 @@
 package org.shopflow.backend.application.usecase.auth
 
+import io.jsonwebtoken.Jwts
+import io.jsonwebtoken.security.Keys
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.shopflow.backend.application.command.auth.LoginCommand
@@ -42,7 +46,10 @@ import org.shopflow.backend.domain.repository.auth.UserRepository
 import org.shopflow.backend.domain.service.TimeProvider
 import org.shopflow.backend.domain.service.auth.PasswordHasher
 import org.shopflow.backend.domain.service.auth.TokenProvider
+import org.shopflow.backend.infrastructure.security.jwt.JwtService
 import java.time.Instant
+import java.util.Base64
+import java.util.Date
 
 class AuthUseCasesTest {
     private lateinit var userRepository: InMemoryUserRepository
@@ -242,7 +249,6 @@ class AuthUseCasesTest {
         registerUseCase.execute(RegisterCommand("carol@shopflow.org", "Password123"))
         val loginResult = loginUseCase.execute(LoginCommand("carol@shopflow.org", "Password123"))
 
-        clockTime = clockTime.plusSeconds(10)
         val refreshed = refreshTokenUseCase.execute(RefreshTokenCommand(loginResult.refreshToken))
 
         assertNotEquals(loginResult.refreshToken, refreshed.refreshToken)
@@ -252,6 +258,122 @@ class AuthUseCasesTest {
         assertThrows(InvalidTokenException::class.java) {
             refreshTokenUseCase.execute(RefreshTokenCommand(loginResult.accessToken))
         }
+    }
+
+    @Test
+    fun `consecutive logins and immediate refresh with real JwtService under fixed clock avoid collisions and rotate safely`() {
+        val testSecretBytes = "test-only-jwt-hmac-secret-key-32bytes!!".encodeToByteArray()
+        val testSecretBase64 = Base64.getEncoder().encodeToString(testSecretBytes)
+        val secretKey = Keys.hmacShaKeyFor(testSecretBytes)
+        val realJwtService = JwtService(testSecretBase64, timeProvider)
+        val realIssuer = AuthTokenIssuer(realJwtService, refreshTokenRepository, timeProvider)
+        val realLoginUseCase = LoginUseCase(userRepository, passwordHasher, realIssuer, timeProvider, eventPublisher)
+        val realRefreshUseCase =
+            RefreshTokenUseCase(
+                realJwtService,
+                userRepository,
+                refreshTokenRepository,
+                realIssuer,
+                timeProvider,
+            )
+
+        val profile = registerUseCase.execute(RegisterCommand("real-jwt@shopflow.org", "Password123"))
+        val userId = UserId.fromString(profile.id)
+
+        val firstLogin = realLoginUseCase.execute(LoginCommand("real-jwt@shopflow.org", "Password123"))
+        val secondLogin = realLoginUseCase.execute(LoginCommand("real-jwt@shopflow.org", "Password123"))
+
+        assertNotEquals(firstLogin.refreshToken, secondLogin.refreshToken)
+        assertNotEquals(
+            realJwtService.hashRefreshToken(firstLogin.refreshToken),
+            realJwtService.hashRefreshToken(secondLogin.refreshToken),
+        )
+        assertEquals(2, refreshTokenRepository.countByUserId(userId))
+
+        val rotatedSecond = realRefreshUseCase.execute(RefreshTokenCommand(secondLogin.refreshToken))
+        assertNotEquals(secondLogin.refreshToken, rotatedSecond.refreshToken)
+        assertNotEquals(firstLogin.refreshToken, rotatedSecond.refreshToken)
+        assertTrue(realJwtService.validateRefreshToken(rotatedSecond.refreshToken))
+        assertThrows(InvalidTokenException::class.java) {
+            realRefreshUseCase.execute(RefreshTokenCommand(secondLogin.refreshToken))
+        }
+
+        val rotatedFirst = realRefreshUseCase.execute(RefreshTokenCommand(firstLogin.refreshToken))
+        assertNotEquals(firstLogin.refreshToken, rotatedFirst.refreshToken)
+        assertThrows(InvalidTokenException::class.java) {
+            realRefreshUseCase.execute(RefreshTokenCommand(firstLogin.refreshToken))
+        }
+
+        // Legacy refresh token without jti can still rotate into a new jti-bearing token during transition
+        val now = Date.from(clockTime)
+        val legacyRefreshToken =
+            Jwts
+                .builder()
+                .subject(userId.value.toString())
+                .claim("type", "refresh")
+                .issuedAt(now)
+                .expiration(Date(now.time + realJwtService.refreshTokenValidityMs))
+                .signWith(secretKey, Jwts.SIG.HS256)
+                .compact()
+        refreshTokenRepository.save(
+            RefreshToken(
+                userId = userId,
+                hashedToken = realJwtService.hashRefreshToken(legacyRefreshToken),
+                expiresAt = clockTime.plusMillis(realJwtService.refreshTokenValidityMs),
+                createdAt = clockTime,
+            ),
+        )
+
+        val rotatedLegacy = realRefreshUseCase.execute(RefreshTokenCommand(legacyRefreshToken))
+        assertNotEquals(legacyRefreshToken, rotatedLegacy.refreshToken)
+        val rotatedLegacyClaims =
+            Jwts
+                .parser()
+                .clock { Date.from(clockTime) }
+                .verifyWith(secretKey)
+                .build()
+                .parseSignedClaims(rotatedLegacy.refreshToken)
+                .payload
+        assertFalse(rotatedLegacyClaims.id.isNullOrBlank())
+        assertThrows(InvalidTokenException::class.java) {
+            realRefreshUseCase.execute(RefreshTokenCommand(legacyRefreshToken))
+        }
+    }
+
+    @Test
+    fun `refresh rejects expired stored token without issuing new token`() {
+        val registered = registerUseCase.execute(RegisterCommand("expired@shopflow.org", "Password123"))
+        val userId = UserId.fromString(registered.id)
+        val loginResult = loginUseCase.execute(LoginCommand("expired@shopflow.org", "Password123"))
+        assertEquals(1, refreshTokenRepository.countByUserId(userId))
+
+        clockTime = clockTime.plusMillis(tokenProvider.refreshTokenValidityMs)
+
+        assertThrows(InvalidTokenException::class.java) {
+            refreshTokenUseCase.execute(RefreshTokenCommand(loginResult.refreshToken))
+        }
+        assertEquals(1, refreshTokenRepository.countByUserId(userId))
+        val remaining =
+            refreshTokenRepository.findByUserIdAndHashedToken(
+                userId,
+                tokenProvider.hashRefreshToken(loginResult.refreshToken),
+            )
+        assertEquals(true, remaining != null)
+    }
+
+    @Test
+    fun `refresh after logout rejects revoked token without adding tokens`() {
+        val registered = registerUseCase.execute(RegisterCommand("revoked@shopflow.org", "Password123"))
+        val userId = UserId.fromString(registered.id)
+        val loginResult = loginUseCase.execute(LoginCommand("revoked@shopflow.org", "Password123"))
+
+        logoutUseCase.execute(LogoutCommand(loginResult.refreshToken))
+        assertEquals(0, refreshTokenRepository.countByUserId(userId))
+
+        assertThrows(InvalidTokenException::class.java) {
+            refreshTokenUseCase.execute(RefreshTokenCommand(loginResult.refreshToken))
+        }
+        assertEquals(0, refreshTokenRepository.countByUserId(userId))
     }
 
     @Test
@@ -276,6 +398,30 @@ class AuthUseCasesTest {
         assertThrows(UserNotFoundException::class.java) {
             getCurrentUserUseCase.execute(GetCurrentUserQuery(UserId.generate().value.toString()))
         }
+    }
+
+    @Test
+    fun `register propagates UserAlreadyExistsException on concurrent email constraint without publishing event`() {
+        val racingUserRepository =
+            object : UserRepository by userRepository {
+                override fun existsByEmail(email: Email): Boolean = false
+
+                override fun save(user: User): User = throw UserAlreadyExistsException()
+            }
+        val racingRegisterUseCase =
+            RegisterUseCase(
+                racingUserRepository,
+                roleRepository,
+                passwordHasher,
+                timeProvider,
+                eventPublisher,
+            )
+
+        val eventCountBefore = eventPublisher.events.size
+        assertThrows(UserAlreadyExistsException::class.java) {
+            racingRegisterUseCase.execute(RegisterCommand("race@shopflow.org", "Password123"))
+        }
+        assertEquals(eventCountBefore, eventPublisher.events.size)
     }
 
     private class InMemoryUserRepository :
@@ -324,31 +470,67 @@ class AuthUseCasesTest {
     }
 
     private class InMemoryRefreshTokenRepository : RefreshTokenRepository {
+        private val lock = Any()
         private val tokens = mutableListOf<RefreshToken>()
 
         override fun findByUserIdAndHashedToken(
             userId: UserId,
             hashedToken: String,
         ): RefreshToken? =
-            tokens.firstOrNull {
-                it.userId == userId && it.hashedToken == hashedToken
+            synchronized(lock) {
+                tokens.firstOrNull {
+                    it.userId == userId && it.hashedToken == hashedToken
+                }
+            }
+
+        override fun consumeIfValid(
+            userId: UserId,
+            hashedToken: String,
+            now: Instant,
+        ): Boolean =
+            synchronized(lock) {
+                val index =
+                    tokens.indexOfFirst {
+                        it.userId == userId && it.hashedToken == hashedToken && !it.isExpired(now)
+                    }
+                if (index < 0) {
+                    false
+                } else {
+                    tokens.removeAt(index)
+                    true
+                }
             }
 
         override fun deleteByUserIdAndHashedToken(
             userId: UserId,
             hashedToken: String,
-        ) {
-            tokens.removeIf { it.userId == userId && it.hashedToken == hashedToken }
-        }
+        ): Boolean =
+            synchronized(lock) {
+                tokens.removeIf { it.userId == userId && it.hashedToken == hashedToken }
+            }
 
         override fun deleteAllByUserId(userId: UserId) {
-            tokens.removeIf { it.userId == userId }
+            synchronized(lock) {
+                tokens.removeIf { it.userId == userId }
+            }
         }
 
-        override fun save(refreshToken: RefreshToken): RefreshToken {
-            tokens += refreshToken
-            return refreshToken
-        }
+        override fun save(refreshToken: RefreshToken): RefreshToken =
+            synchronized(lock) {
+                if (tokens.any {
+                        it.id != refreshToken.id &&
+                            it.userId == refreshToken.userId &&
+                            it.hashedToken == refreshToken.hashedToken
+                    }
+                ) {
+                    throw IllegalStateException("Duplicate refresh token hash for user ${refreshToken.userId}")
+                }
+                tokens.removeIf { it.id == refreshToken.id }
+                tokens += refreshToken
+                refreshToken
+            }
+
+        fun countByUserId(userId: UserId): Int = synchronized(lock) { tokens.count { it.userId == userId } }
     }
 
     private class FakePasswordHasher : PasswordHasher {

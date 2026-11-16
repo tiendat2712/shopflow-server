@@ -32,13 +32,10 @@ class RefreshTokenUseCase(
         user.ensureCanAuthenticate()
 
         val hashedToken = tokenProvider.hashRefreshToken(command.refreshToken)
-        val storedToken =
-            refreshTokenRepository.findByUserIdAndHashedToken(user.id, hashedToken)
-                ?: throw InvalidTokenException("Refresh token not recognized (maybe used or expired?)")
-
-        storedToken.ensureNotExpired(timeProvider.now())
-
-        refreshTokenRepository.deleteByUserIdAndHashedToken(user.id, hashedToken)
+        val consumed = refreshTokenRepository.consumeIfValid(user.id, hashedToken, timeProvider.now())
+        if (!consumed) {
+            throw InvalidTokenException("Refresh token not recognized (maybe used or expired?)")
+        }
 
         return authTokenIssuer.issueAndStoreTokens(user)
     }
